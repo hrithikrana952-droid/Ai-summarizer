@@ -1,12 +1,18 @@
 import SwiftUI
 
+class AppState: ObservableObject {
+    static let shared = AppState()
+    @Published var isRecording = false
+}
+
 @main
 struct ConversationAgentApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    @StateObject private var appState = AppState.shared
 
     var body: some Scene {
-        MenuBarExtra("Conversation Agent", systemImage: appDelegate.isRecording ? "record.circle.fill" : "waveform.circle") {
-            Button(appDelegate.isRecording ? "Stop Recording (⌥⇧F)" : "Start Recording (⌥⇧F)") {
+        MenuBarExtra("Conversation Agent", systemImage: appState.isRecording ? "record.circle.fill" : "waveform.circle") {
+            Button(appState.isRecording ? "Stop Recording (⌥⇧F)" : "Start Recording (⌥⇧F)") {
                 appDelegate.toggleRecording()
             }
             Divider()
@@ -17,8 +23,7 @@ struct ConversationAgentApp: App {
     }
 }
 
-class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
-    @Published var isRecording = false
+class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotkeyManager: HotkeyManager?
     private var screenCaptureManager: ScreenCaptureManager?
     private var audioManager: AudioManager?
@@ -61,7 +66,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     func toggleRecording() {
-        isRecording.toggle()
+        AppState.shared.isRecording.toggle()
+        let isRecording = AppState.shared.isRecording
+        
         if isRecording {
             currentSessionPath = VaultManager.shared.createSession()
             debugLog("Started recording session...")
