@@ -77,6 +77,24 @@ Once the dependencies are set up, you can build and install the app:
 
 ---
 
+## Troubleshooting Permissions (Code Signing)
+
+If macOS keeps asking you for Screen Recording or Microphone permissions every time you rebuild the app, or if it silently blocks access despite granting permissions in System Settings, it is because of **Code Signing**. 
+
+By default, locally built macOS apps get an ad-hoc signature that changes on every build. macOS treats every rebuild as a "new" untrusted app and revokes permissions. To fix this:
+
+1. Open **Keychain Access** on your Mac.
+2. In the menu bar, go to **Keychain Access > Certificate Assistant > Create a Certificate...**
+3. Name it exactly: **`ConversationAgentSign`**
+4. Set Identity Type to **Self Signed Root**, and Certificate Type to **Code Signing**.
+5. Click Create.
+6. Find the certificate in Keychain, double-click it, open **Trust**, and set "When using this certificate" to **Always Trust**.
+7. Close the window (you will be prompted for your Mac password to save the trust settings).
+
+The `./build.sh` script is already configured to look for this `ConversationAgentSign` certificate and will automatically use it to sign your app. This guarantees the app hash stays consistent, and macOS will permanently remember your permissions!
+
+---
+
 ## Model Selection for M2/M3 Chips
 
 The code currently defaults to `qwen2.5:32b` in `Sources/OllamaManager.swift`. This is a heavy 32-billion parameter model that requires a powerful Mac (like an M5 Pro or Mac Studio).
