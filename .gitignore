@@ -43,3 +43,9 @@ whisper.cpp/models/
 # Temporary files
 *.swp
 *~
+
+# Graphify
+graphify/
+.graphify/
+graphify-out/
+GRAPH_REPORT.md
