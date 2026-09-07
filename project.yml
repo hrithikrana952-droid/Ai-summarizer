@@ -1,0 +1,17 @@
+name: ConversationAgent
+options:
+  bundleIdPrefix: com.example
+targets:
+  ConversationAgent:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - Sources
+    info:
+      path: Sources/Info.plist
+      properties:
+        LSUIElement: true
+        NSMicrophoneUsageDescription: "Conversation Agent needs microphone access to record your voice."
+        NSScreenCaptureUsageDescription: "Conversation Agent needs screen capture access to analyze on-screen text."
+        NSSpeechRecognitionUsageDescription: "Conversation Agent needs speech recognition access for voice commands."

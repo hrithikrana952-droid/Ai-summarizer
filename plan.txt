@@ -1,0 +1,183 @@
+CONVERSATION CAPTURE & ACTION-ITEM AGENT
+macOS App — Fully Local Architecture
+Prepared: September 5, 2026
+Target hardware: MacBook Pro, Apple M5 Pro, 48GB unified memory (307GB/s bandwidth)
+
+=========================================================
+1. OVERVIEW
+=========================================================
+A macOS menu-bar application that, when triggered, captures both the screen
+and the audio of a conversation (calls, meetings, or any on-screen activity),
+transcribes and reads everything locally using on-device models, and produces
+a structured session log: full transcript, bullet-point summary, action
+items, and highlights from the other party. Nothing leaves the device —
+no cloud APIs, no third-party data exposure, no API keys required.
+
+=========================================================
+2. TRIGGER
+=========================================================
+- Menu-bar app with a global hotkey (e.g. Option+Shift+F) to start a capture
+  session, and the same hotkey to stop it.
+- Voice-based wake trigger ("focus on my screen" / "stop") is a possible V2
+  addition using SFSpeechRecognizer with requiresOnDeviceRecognition = true
+  (fully on-device, no network) — not required for MVP due to battery/false-
+  trigger tradeoffs of continuous listening.
+
+=========================================================
+3. CAPTURE LAYER (runs while a session is active)
+=========================================================
+3.1 Screen capture
+- Apple's ScreenCaptureKit (macOS 12.3+) takes periodic screenshots
+  (every 2-3 seconds).
+- Skip/dedup frames where nothing has visibly changed, to avoid wasted
+  processing on idle screens.
+
+3.2 Audio capture (system audio = other party, mic = you)
+- System audio loopback via a virtual audio driver (e.g. BlackHole) captures
+  the OTHER PARTY's voice from any call (Zoom, Teams, Meet, browser calls).
+- Local microphone captured on a separate channel for the user's own voice.
+- Two separate channels give natural speaker separation ("me" vs "them")
+  without needing heavyweight diarization on a single mixed track.
+- Both screen capture and audio capture start/stop together on the same
+  hotkey trigger.
+
+=========================================================
+4. READING WHAT WAS CAPTURED
+=========================================================
+4.1 Screen content
+- Vision framework OCR (VNRecognizeTextRequest) extracts visible text from
+  each screenshot — fast and accurate for docs, chat windows, clean UI text.
+- A local vision-capable LLM (Qwen2-VL 7B, Q4 quantized) handles anything
+  OCR can't read well — mixed UI, diagrams, video call layouts. Used as a
+  fallback/supplement to OCR, not a full replacement.
+
+4.2 Audio content
+- whisper.cpp (Metal-accelerated) transcribes both audio channels locally.
+  Model size: ~1-3GB on disk (medium/large-v3 variants). Runs fast on M5 Pro.
+- Output includes per-channel transcripts with natural "me" vs "other party"
+  labeling from the channel split (not model-based diarization).
+
+=========================================================
+5. MERGE STEP
+=========================================================
+- Audio transcript (speaker-labeled) and screen-read text (OCR + vision) are
+  merged into a single timestamp-aligned session log once the session ends.
+- This combined log is the input to the summarization step below.
+
+=========================================================
+6. LOCAL LLM PROCESSING (on session stop)
+=========================================================
+- Model: Qwen2.5 32B, Q4_K_M quantized, run via Ollama (uses Metal/GPU
+  automatically on Apple Silicon). ~19-20GB on disk.
+- Model loads only when a session ends and unloads after processing —
+  not kept resident all day, to avoid unnecessary GPU/power draw.
+- Structured prompt produces four outputs per session:
+    1. Full cleaned transcript (speaker-labeled, timestamped)
+    2. Bullet-point summary of the whole conversation
+    3. Action items — each with task, owner (if inferable), due date
+       (if mentioned)
+    4. Highlights from the other party specifically — key points,
+       commitments, or decisions THEY made, separated from the user's
+       own summary/action items
+- Output requested as structured JSON so the app can render it reliably.
+
+=========================================================
+7. LOCAL STORAGE
+=========================================================
+- All output saved locally under a vault folder, e.g.:
+
+  /ConversationVault/
+    /2026-09-05_TeamsCall_ProjectX/
+      transcript.md
+      summary.md
+      action_items.json
+      other_party_highlights.md
+    /2026-09-05_Slack_#eng-team/
+      ...
+
+- SQLite database indexes all sessions for local search (e.g. "find all
+  action items assigned to me last week").
+- Action items can optionally sync to an external to-do app (Reminders,
+  Todoist, Things, or a local markdown checklist) — the vault remains the
+  source of truth regardless.
+
+=========================================================
+8. HARDWARE / RESOURCE BUDGET (M5 Pro, 48GB unified memory)
+=========================================================
+Models used and approximate disk footprint (Q4 quantized):
+  - Qwen2.5 32B (summarization/action items):      ~19-20 GB
+  - Qwen2-VL 7B (vision fallback for screen reads): ~5-6 GB
+  - whisper.cpp medium/large-v3 (audio transcription): ~1-3 GB
+  - Ollama runtime + app overhead:                  ~1-2 GB
+  Total: roughly 26-31 GB disk space — comfortably fits alongside the
+  32B model in 48GB unified memory; all three can run concurrently if needed.
+
+Vault storage (transcripts/summaries/JSON as plain text) is negligible —
+likely under a few hundred MB even after months of daily use, since no raw
+audio/video is stored by default. If raw audio recordings are added later,
+budget ~0.5-1 GB per hour of audio — a deliberate decision, not a default.
+
+=========================================================
+9. DATA FLOW (END TO END)
+=========================================================
+1. User presses hotkey -> session starts.
+2. Screen capture (every 2-3s) + system audio + mic capture run in parallel.
+3. User presses hotkey again -> session stops.
+4. whisper.cpp transcribes both audio channels locally.
+5. Vision framework OCR (+ vision LLM fallback) reads captured screenshots.
+6. Audio transcript + screen text merged into one timestamp-aligned log.
+7. Merged log sent to local Qwen2.5 32B via Ollama -> structured JSON output
+   (transcript, summary, action items, other-party highlights).
+8. App writes all files to /ConversationVault/, updates the SQLite index,
+   and optionally pushes action items to an external to-do app.
+9. User gets a notification, e.g. "3 new action items from today's call."
+
+=========================================================
+10. COMPLIANCE / DESIGN NOTES
+=========================================================
+- Recording calls (audio/screen) often requires participant notice or
+  consent depending on jurisdiction and company policy — the app should
+  make its active state visible (e.g. menu-bar icon state), not run silently.
+- No cloud exposure by design in this version — all processing (OCR,
+  vision, transcription, summarization) runs on-device.
+- Noise filtering: skip frames/audio segments with no meaningful content
+  (silence detection, minimum speech duration) before sending to local
+  models, to avoid wasted GPU cycles on idle periods.
+
+=========================================================
+11. BUILD PHASES
+=========================================================
+MVP:
+  - Hotkey start/stop
+  - Screen capture + OCR
+  - System audio + mic capture -> whisper.cpp transcription
+  - Merge + Qwen2.5 32B summarization -> transcript/bullets/action items
+  - Save to local vault as markdown/JSON
+
+V2:
+  - Voice-based start/stop trigger (on-device SFSpeechRecognizer)
+  - Vision LLM fallback for screen reads (Qwen2-VL 7B)
+  - Local search/dashboard over the vault (SQLite-backed)
+  - Other-party highlights as a distinct output section
+
+V3:
+  - External to-do app sync (Reminders/Todoist/Things)
+  - Speaker recognition across multiple recurring meetings
+  - Weekly digest ("everything you owe people this week")
+
+=========================================================
+12. RECOMMENDED TECH STACK SUMMARY
+=========================================================
+- App shell: Swift/SwiftUI menu-bar app
+- Screen capture: ScreenCaptureKit
+- OCR: Vision framework (VNRecognizeTextRequest)
+- Vision LLM (fallback): Qwen2-VL 7B, Q4 quantized
+- Audio loopback: BlackHole (virtual audio driver)
+- Speech-to-text: whisper.cpp (Metal-accelerated)
+- Summarization/action items: Qwen2.5 32B (Q4_K_M) via Ollama
+- Local storage: flat files (markdown/JSON) + SQLite index
+- Optional integration: Reminders/Todoist/Things API for action-item sync
+
+=========================================================
+END OF PLAN
+=========================================================
