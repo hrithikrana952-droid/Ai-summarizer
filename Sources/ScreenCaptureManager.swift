@@ -10,6 +10,7 @@ class ScreenCaptureManager: NSObject, SCStreamDelegate, SCStreamOutput {
 
     private var textRequest = VNRecognizeTextRequest()
     private var lastFrameTime: Date = Date.distantPast
+    private var lastRecognizedText: String = ""
 
     override init() {
         super.init()
@@ -19,6 +20,15 @@ class ScreenCaptureManager: NSObject, SCStreamDelegate, SCStreamOutput {
     func setupOCR() {
         textRequest.recognitionLevel = .accurate
         textRequest.usesLanguageCorrection = true
+    }
+
+    private func calculateSimilarity(_ textA: String, _ textB: String) -> Double {
+        let setA = Set(textA.components(separatedBy: .whitespacesAndNewlines))
+        let setB = Set(textB.components(separatedBy: .whitespacesAndNewlines))
+        let intersection = setA.intersection(setB)
+        let union = setA.union(setB)
+        guard !union.isEmpty else { return 1.0 }
+        return Double(intersection.count) / Double(union.count)
     }
 
     func requestPermissions() async {
@@ -76,7 +86,7 @@ class ScreenCaptureManager: NSObject, SCStreamDelegate, SCStreamOutput {
         guard type == .screen else { return }
 
         let now = Date()
-        if now.timeIntervalSince(lastFrameTime) < 3.0 { return }
+        if now.timeIntervalSince(lastFrameTime) < 6.0 { return }
         lastFrameTime = now
 
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
@@ -92,6 +102,13 @@ class ScreenCaptureManager: NSObject, SCStreamDelegate, SCStreamOutput {
             }.joined(separator: "\n")
 
             if !recognizedText.isEmpty {
+                let similarity = calculateSimilarity(recognizedText, lastRecognizedText)
+                if similarity > 0.85 {
+                    return // Skip logging if text is highly similar to last frame
+                }
+                
+                lastRecognizedText = recognizedText
+
                 let formatter = DateFormatter()
                 formatter.dateFormat = "HH:mm:ss"
                 let timeStr = formatter.string(from: now)
