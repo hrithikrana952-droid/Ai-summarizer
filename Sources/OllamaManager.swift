@@ -55,7 +55,7 @@ class OllamaManager {
         var request = URLRequest(url: endpoint)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 300
+        request.timeoutInterval = 1800
 
         do {
             let encodedBody = try JSONEncoder().encode(reqBody)
