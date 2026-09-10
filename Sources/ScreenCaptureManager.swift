@@ -39,16 +39,43 @@ class ScreenCaptureManager: NSObject, SCStreamDelegate, SCStreamOutput {
         }
     }
 
-    func startCapture() {
+    /// Returns all connected displays as tuples of (displayID, width, height).
+    func getAvailableDisplays() async -> [(displayID: CGDirectDisplayID, width: Int, height: Int)] {
+        do {
+            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            return content.displays.map { ($0.displayID, $0.width, $0.height) }
+        } catch {
+            print("Failed to get displays: \(error)")
+            return []
+        }
+    }
+
+    /// Starts screen capture on a specific display. If no displayID is provided, defaults to the primary display.
+    func startCapture(displayID: CGDirectDisplayID? = nil) {
         // Clear previous OCR file
         if FileManager.default.fileExists(atPath: ocrFileURL.path) {
             try? FileManager.default.removeItem(at: ocrFileURL)
         }
 
+        // Reset deduplication state for new session
+        lastRecognizedText = ""
+        lastFrameTime = Date.distantPast
+
         Task {
             do {
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-                guard let display = content.displays.first else { return }
+
+                let selectedDisplay: SCDisplay?
+                if let displayID = displayID {
+                    selectedDisplay = content.displays.first(where: { $0.displayID == displayID })
+                } else {
+                    selectedDisplay = content.displays.first
+                }
+
+                guard let display = selectedDisplay else {
+                    print("No matching display found.")
+                    return
+                }
 
                 let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
                 let configuration = SCStreamConfiguration()
@@ -64,7 +91,7 @@ class ScreenCaptureManager: NSObject, SCStreamDelegate, SCStreamOutput {
                 try stream?.addStreamOutput(self, type: .screen, sampleHandlerQueue: .global(qos: .userInitiated))
 
                 try await stream?.startCapture()
-                print("Capture started.")
+                print("Capture started on display \(display.displayID) (\(display.width)x\(display.height)).")
             } catch {
                 print("Failed to start capture: \(error)")
             }
